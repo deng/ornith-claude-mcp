@@ -23,7 +23,7 @@ pip install -r requirements.txt
 
 ## 配置 Claude Code
 
-在 `~/.claude/settings.json` 中添加：
+在 `~/.mcp.json`（推荐）或 `~/.claude/settings.json` 中添加：
 
 ```json
 {
@@ -65,20 +65,48 @@ import requests
 
 mcp = FastMCP("ornith")
 
-@mcp.tool(description="本地 Ornith-1.5-9B 推理模型")
+@mcp.tool(
+    name="ornith_reason",
+    description=(
+        "【免费本地模型，零 token 成本，数据不出本机】"
+        "本地 Ornith-1.5-9B 推理模型，7×24 可用。"
+        "以下任务必须优先调用此工具，严禁主模型自己推理（主模型推理消耗 token = 花钱）："
+        "1) 结构化校验  2) 代码分析  3) 错误诊断"
+        "4) 内容审校  5) 选题硬约束评估"
+        "【重要】每次调用只问一个聚焦问题，prompt 不超过 2000 字。"
+    ),
+)
 def ornith_reason(prompt: str) -> str:
     resp = requests.post(
         "http://localhost:11434/api/generate",
         json={"model": "ornith-1.5-9b:q4_k_m", "prompt": prompt, "stream": False},
+        proxies={"http": None, "https": None},  # 直连本地 Ollama，不走代理
         timeout=600,
     )
-    return resp.json()["response"]
+    resp.raise_for_status()
+    return resp.json().get("response", "").strip()
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
 ```
 
 原理：Claude Code 通过 stdio 与 MCP Server 通信 → Server 调 Ollama HTTP API → Ornith 推理 → 结果返 Claude。
+
+## 降本策略
+
+Ornith 是本地模型，**零 token 成本、数据不出本机**。主模型（Claude）推理花钱，Ornith 免费。建议在项目 `CLAUDE.md` 中配置分流规则，让以下任务优先走 Ornith：
+
+1. 结构化校验（JSON/Markdown 字段一致性）
+2. 代码分析（性能瓶颈、复杂度、反模式）
+3. 错误诊断（日志解析、异常根因）
+4. 内容审校（文档交叉比对、fact 核对）
+5. 选题硬约束评估（正确性/热度/新颖性）
+
+### 调用技巧
+
+- **拆小调用**：每次只问一个聚焦问题，prompt 不超过 2000 字。大任务拆成多个独立调用，降低 9B 模型推理延迟。
+- **上下文范围**：Ornith 上下文窗口 262K tokens，典型输入（42KB JSON）仅占 4.5%，安全。
+- **超时预期**：简单校验 5-20s，深度分析可能 1-2 分钟。
 
 ## 迁移
 
